@@ -5,15 +5,19 @@
 
 
 struct element {
-  int product_id; //Product identifier
-  int op;         //Operation
-  int units;      //Product units
+    int product_id; //Product identifier
+    int op;         //Operation
+    int units;      //Product units
 };
 
 typedef struct queue {
-  // Define the struct yourself
-  int param1;
-}queue;
+    // Define the struct yourself
+    struct element *elements; // Array to store elements
+    int capacity; // Maximum number of elements
+    int front; // Index of the first element
+    int rear; // Index of the last element
+    int size; // Current number of elements
+} queue;
 
 queue* queue_init (int size);
 int queue_destroy (queue *q);
