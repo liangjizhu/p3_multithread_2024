@@ -166,13 +166,13 @@ void process_transaction(struct element *trans, struct thread_data *data) {
     if (trans->op == 0) {  // Purchase
         if (idx >= 0 && idx < 5) {
             data->product_stock[idx] += trans->units;
-            int profit = calculate_profit(trans->product_id, trans->units, 0);
+            int profit = calculate_profit(idx, trans->units, 0);
             *(data->profits) += profit;
         }
     } else {  // Sale
         if (idx >= 0 && idx < 5) {
             data->product_stock[idx] -= trans->units;
-            int profit = calculate_profit(trans->product_id, trans->units, 1);
+            int profit = calculate_profit(idx, trans->units, 1);
             *(data->profits) += profit;
         }
     }
@@ -189,22 +189,15 @@ void initialize_product_pricing() {
     purchase_cost[3] = 25; selling_price[3] = 40;  // Product 4
     purchase_cost[4] = 100; selling_price[4] = 125;// Product 5
 
-    // Products not defined in the table should have 0 as default values
-    for (int i = 0; i < sizeof(purchase_cost) / sizeof(purchase_cost[0]); i++) {
-        if (i > 5) {
-            purchase_cost[i] = 0;
-            selling_price[i] = 0;
-        }
-    }
 }
 
 int calculate_profit(int product_id, int units, int operation) {
     if (units <= 0) return 0;
     int profit_per_unit;
     if (operation == 0) {  // Purchase (subtract costs)
-        profit_per_unit = -purchase_cost[product_id - 1];
+        profit_per_unit = -purchase_cost[product_id];
     } else {  // Sale (add revenues)
-        profit_per_unit = selling_price[product_id - 1];
+        profit_per_unit = selling_price[product_id];
     }
     return profit_per_unit * units;
 }
