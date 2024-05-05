@@ -14,31 +14,25 @@
 
 #define END_OF_PRODUCTION -1
 
-
-queue* transaction_queue;
-
-// Mutex for final results
-pthread_mutex_t file_lock;
-pthread_mutex_t results_lock;
+pthread_mutex_t file_lock, results_lock;
 FILE *fp = NULL;
-int current_operation = 0;
-int total_operations = 0;
+int current_operation = 0, total_operations = 0;
+int purchase_cost[6], selling_price[6];  // Extend arrays if more products are expected
+queue* transaction_queue = NULL;
 
-// Assuming a predefined array to hold product costs and selling prices
-int purchase_cost[6];
-int selling_price[6];
+struct thread_data {
+    int* profits;
+    int* product_stock;
+};
 
-int profits = 0;
-int product_stock [5] = {0};
 
 void initialize_product_pricing();
-int calculate_profit(int product_id, int units);
+int calculate_profit(int product_id, int units, int operation);
 void cleanup_transaction_system();
 void initialize_transaction_system(const char *filename);
-void process_transaction(struct element *trans);
+void process_transaction(struct element *trans, struct thread_data *data);
 void* consumer(void *arg);
 void* producer(void *arg);
-
 
 struct element* read_next_transaction() {
   pthread_mutex_lock(&file_lock);
@@ -71,15 +65,18 @@ struct element* read_next_transaction() {
 
 int main (int argc, const char * argv[])
 {
-
-  const char *filename = argv[1];
   if (argc != 5) {
     fprintf(stderr, "Usage: %s <file name> <num producers> <num consumers> <buff size>\n", argv[0]);
     return EXIT_FAILURE;
   }
+
+  const char *filename = argv[1];
   int num_producers = atoi(argv[2]);
   int num_consumers = atoi(argv[3]);
   int buff_size = atoi(argv[4]);
+  int profits = 0;
+  int product_stock[5] = {0};
+
   if (num_producers <= 0 || num_consumers <= 0 || buff_size <= 0) {
     fprintf(stderr, "Invalid number of producers, consumers, or buffer size\n");
     return EXIT_FAILURE;
@@ -98,13 +95,14 @@ int main (int argc, const char * argv[])
   
   pthread_mutex_init(&results_lock, NULL);
   pthread_t producers[num_producers], consumers[num_consumers];
+  struct thread_data data = {&profits, product_stock};
 
   // Create producer and consumer threads
   for (int i = 0; i < num_producers; i++) {
-      pthread_create(&producers[i], NULL, producer, NULL);
+      pthread_create(&producers[i], NULL, producer, &data);
   }
   for (int i = 0; i < num_consumers; i++) {
-      pthread_create(&consumers[i], NULL, consumer, NULL);
+      pthread_create(&consumers[i], NULL, consumer, &data);
   }
 
   // Wait for all threads to finish
@@ -127,8 +125,6 @@ int main (int argc, const char * argv[])
 
   cleanup_transaction_system();
   queue_destroy(transaction_queue);
-  free(producers);
-  free(consumers);
   pthread_mutex_destroy(&results_lock);
   return 0;
 }
@@ -141,40 +137,68 @@ void* producer(void *arg) {
     }
     // Signal end of production by pushing a special 'end' transaction
     transaction = malloc(sizeof(struct element));
+    if (!transaction) return NULL;  // Handle malloc failure
     transaction->product_id = END_OF_PRODUCTION;
     queue_put(transaction_queue, transaction);
     return NULL;
 }
 
 void* consumer(void *arg) {
+    struct thread_data *data = (struct thread_data*) arg;
     struct element *transaction;
+
     while (1) {
         transaction = queue_get(transaction_queue);
         if (transaction->product_id == END_OF_PRODUCTION) {
-            free(transaction);
-            break;  // Exit the loop and terminate the thread
+            free(transaction);  // Don't forget to free the sentinel transaction
+            break;
         }
-        process_transaction(transaction);
+        process_transaction(transaction, data);
         free(transaction);
     }
     return NULL;
 }
 
-void process_transaction(struct element *trans) {
-    int profit = 0;
+void process_transaction(struct element *trans, struct thread_data *data) {
     pthread_mutex_lock(&results_lock);
-
+    int idx = trans->product_id - 1;  // Adjust index for zero-based array access
     if (trans->op == 0) {  // Purchase
-        product_stock[trans->product_id - 1] += trans->units;
-    } else if (trans->op == 1) {  // Sale
-        if (product_stock[trans->product_id - 1] >= trans->units) {
-            product_stock[trans->product_id - 1] -= trans->units;
-            profit = calculate_profit(trans->product_id, trans->units);
-            profits += profit;
+        if (idx >= 0 && idx < 5) {
+            data->product_stock[idx] += trans->units;
+            int profit = calculate_profit(trans->product_id, trans->units, 0);
+            *(data->profits) += profit;
+        }
+    } else {  // Sale
+        if (idx >= 0 && idx < 5 && data->product_stock[idx] >= trans->units) {
+            data->product_stock[idx] -= trans->units;
+            int profit = calculate_profit(trans->product_id, trans->units, 1);
+            *(data->profits) += profit;
         }
     }
     pthread_mutex_unlock(&results_lock);
 }
+
+
+/*
+void process_transaction(struct element *trans, struct thread_data *data) {
+    pthread_mutex_lock(&results_lock);
+    int idx = trans->product_id - 1;  // Adjust index for zero-based array access
+
+    if (trans->op == 0) {  // Purchase
+        if (idx >= 0 && idx < 5) {
+            data->product_stock[idx] += trans->units;
+        }
+    } else {  // Sale
+        if (idx >= 0 && idx < 5 && data->product_stock[idx] >= trans->units) {
+            data->product_stock[idx] -= trans->units;
+            int profit = calculate_profit(trans->product_id, trans->units);
+            *(data->profits) += profit;  // Update the profits using the pointer
+        }
+    }
+    pthread_mutex_unlock(&results_lock);
+}*/
+
+
 
 
 void initialize_product_pricing() {
@@ -194,17 +218,24 @@ void initialize_product_pricing() {
     }
 }
 
-int calculate_profit(int product_id, int units) {
-    if (units <= 0) {
-        return 0;  // No units sold, no profit
+int calculate_profit(int product_id, int units, int operation) {
+    if (units <= 0) return 0;
+    int profit_per_unit;
+    if (operation == 0) {  // Purchase (subtract costs)
+        profit_per_unit = -purchase_cost[product_id - 1];
+    } else {  // Sale (add revenues)
+        profit_per_unit = selling_price[product_id - 1];
     }
-    int profit_per_unit = selling_price[product_id] - purchase_cost[product_id];
     return profit_per_unit * units;
 }
+/*
+int calculate_profit(int product_id, int units) {
+    if (units <= 0) return 0;  // No profit from zero or negative units
+    return (selling_price[product_id] - purchase_cost[product_id]) * units;
+}*/
 
 void initialize_transaction_system(const char *filename) {
     pthread_mutex_init(&file_lock, NULL);
-    initialize_product_pricing();
 
     fp = fopen(filename, "r");
     if (fp == NULL) {
