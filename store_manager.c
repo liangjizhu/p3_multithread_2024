@@ -12,118 +12,102 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
-typedef struct {
-    int product_id;
-    char operation; 
-    int units;
-} Transaction;
 
+queue* transaction_queue;
 
-typedef struct {
-    int purchase_price;
-    int selling_price;
-} ProductPricing;
+// Mutex for final results
+pthread_mutex_t file_lock;
+pthread_mutex_t results_lock;
+FILE *fp = NULL;
+int current_operation = 0;
+int total_operations = 0;
 
+// Assuming a predefined array to hold product costs and selling prices
+int purchase_cost[6];
+int selling_price[6];
 
-// Global array to store pricing
-ProductPricing* product_prices;  // Dinamic array for prices
+int profits = 0;
+int product_stock [5] = {0};
 
+void initialize_product_pricing();
+int calculate_profit(int product_id, int units);
+void cleanup_transaction_system();
+void initialize_transaction_system(const char *filename);
+void process_transaction(struct element *trans);
 void* consumer(void *arg);
 void* producer(void *arg);
 
-int main (int argc, const char * argv[])
-{
-  const char* file_name = argv[1]; // To open the file
-  if (argc != 5) {
-  fprintf(stderr, "Usage: %s <file name> <num producers> <num consumers> <buff size>\n", argv[0]);
-  return EXIT_FAILURE;
+
+struct element* read_next_transaction() {
+  pthread_mutex_lock(&file_lock);
+
+  if (current_operation >= total_operations) {
+      pthread_mutex_unlock(&file_lock);
+      return NULL;
   }
 
+  struct element* new_elem = malloc(sizeof(struct element));
+  if (new_elem == NULL) {
+      pthread_mutex_unlock(&file_lock);
+      return NULL;
+  }
+
+  char operation[10]; // Temporary string to hold the operation
+  if (fscanf(fp, "%d %s %d", &new_elem->product_id, operation, &new_elem->units) != 3) {
+      free(new_elem);
+      pthread_mutex_unlock(&file_lock);
+      return NULL;
+  }
+
+  new_elem->op = (strcmp("PURCHASE", operation) == 0) ? 0 : 1;
+  current_operation++;
+
+  pthread_mutex_unlock(&file_lock);
+  return new_elem;
+}
+
+
+int main (int argc, const char * argv[])
+{
+
+  const char *filename = argv[1];
   int num_producers = atoi(argv[2]);
   int num_consumers = atoi(argv[3]);
   int buff_size = atoi(argv[4]);
   if (num_producers <= 0 || num_consumers <= 0 || buff_size <= 0) {
-      fprintf(stderr, "Invalid number of producers, consumers, or buffer size\n");
-      return EXIT_FAILURE;
+    fprintf(stderr, "Invalid number of producers, consumers, or buffer size\n");
+    return EXIT_FAILURE;
   }
 
+  // Initialize global variables and pricing
+  initialize_product_pricing();
+  initialize_transaction_system(filename);
 
-  FILE* file = fopen(file_name, "r");
-  if (!file) {
-      perror("Failed to open file");
-  return EXIT_FAILURE;
+
+  transaction_queue = queue_init(buff_size);
+  if (transaction_queue == NULL) {
+    fprintf(stderr, "Failed to initialize the queue\n");
+    return 1;
   }
+  
+  pthread_mutex_init(&results_lock, NULL);
+  pthread_t producers[num_producers], consumers[num_consumers];
 
-  int num_products;
-  fscanf(file, "%d", &num_products);  // Read the number of products
-
-  ProductPricing* product_prices = malloc(num_products * sizeof(ProductPricing));
-  if (!product_prices) {
-      fclose(file);
-      perror("Failed to allocate memory for product prices");
-      return EXIT_FAILURE;
-  }
-
-  for (int i = 0; i < num_products; i++) {
-      int product_id;  // No necesariamente se usa, pero podría ser útil
-      fscanf(file, "%d %d %d", &product_id, &product_prices[product_id - 1].purchase_price, &product_prices[product_id - 1].selling_price);
-  }
-
-  int num_operations;
-  fscanf(file, "%d", &num_operations);  // Read the number of transactions
-
-  Transaction* transactions = malloc(num_operations * sizeof(Transaction));
-  if (!transactions) {
-      fclose(file);
-      free(product_prices);
-      perror("Failed to allocate memory for transactions");
-      return EXIT_FAILURE;
-  }
-
-  for (int i = 0; i < num_operations; i++) {
-      fscanf(file, "%d %c %d", 
-          &transactions[i].product_id, 
-          &transactions[i].operation, 
-          &transactions[i].units);
-  }
-
-  fclose(file);
-
-  queue *q = queue_init(buff_size);
-  if (!q) {
-      free(transactions);
-      free(product_prices);
-      fprintf(stderr, "Failed to initialize the queue\n");
-      return EXIT_FAILURE;
-  }
-
-  int profits = 0;
-  int product_stock [5] = {0};
- 
-  // Create threads
-  pthread_t producer_threads[num_producers];
-  pthread_t consumer_threads[num_consumers];
-
+  // Create producer and consumer threads
   for (int i = 0; i < num_producers; i++) {
-      pthread_create(&producer_threads[i], NULL, producer, q);
+      pthread_create(&producers[i], NULL, producer, NULL);
   }
-
-  // Create consumer threads
   for (int i = 0; i < num_consumers; i++) {
-      pthread_create(&consumer_threads[i], NULL, consumer, q);
+      pthread_create(&consumers[i], NULL, consumer, NULL);
   }
 
-  //join the threads
-  // Unir threads de productores
+  // Wait for all threads to finish
   for (int i = 0; i < num_producers; i++) {
-      pthread_join(producer_threads[i], NULL);
+      pthread_join(producers[i], NULL);
   }
-
-  // Unir threads de consumidores
   for (int i = 0; i < num_consumers; i++) {
-      pthread_join(consumer_threads[i], NULL);
+      pthread_join(consumers[i], NULL);
   }
-
 
 
   // Output
@@ -135,27 +119,89 @@ int main (int argc, const char * argv[])
   printf("  Product 4: %d\n", product_stock[3]);
   printf("  Product 5: %d\n", product_stock[4]);
 
-  queue_destroy(q); // Cleanup
-
+  cleanup_transaction_system();
+  queue_destroy(transaction_queue);
+  free(producers);
+  free(consumers);
+  pthread_mutex_destroy(&results_lock);
   return 0;
 }
 
-void* consumer(void *arg) {
-    queue *q = (queue *)arg;
-    for (int i = 0; i < 100; i++) {
-        struct element *e = queue_get(q);
-        printf("Consumed: Product %d, Operation %d, Units %d\n", e->product_id, e->op, e->units);
-    }
-    pthread_exit(NULL);
-}
-
 void* producer(void *arg) {
-    queue *q = (queue *)arg;
-    for (int i = 0; i < 100; i++) { // Produce 100 items
-        struct element e = {i % 5, 1, 10}; // Example item
-        queue_put(q, &e);
+    struct element *transaction;
+    while ((transaction = read_next_transaction()) != NULL) {
+        queue_put(transaction_queue, transaction);
+        free(transaction); // Assuming queue_put copies the data
     }
-    pthread_exit(NULL);
+    return NULL;
 }
 
 
+void* consumer(void *arg) {
+    struct element *transaction;
+    while ((transaction = queue_get(transaction_queue)) != NULL) {
+        process_transaction(transaction);
+        free(transaction);  // Free the element after processing
+    }
+    return NULL;
+}
+
+void process_transaction(struct element *trans) {
+    int profit = 0;
+    pthread_mutex_lock(&results_lock);
+    if (trans->op == 0) {  // Purchase
+        product_stock[trans->product_id] += trans->units;
+    } else if (trans->op == 1) {  // Sale
+        product_stock[trans->product_id] -= trans->units;
+        profit = calculate_profit(trans->product_id, trans->units);
+        profits += profit;
+    }
+    pthread_mutex_unlock(&results_lock);
+}
+
+void initialize_product_pricing() {
+    // Initialize costs and prices for each product based on the provided table
+    purchase_cost[1] = 2;  selling_price[1] = 3;   // Product 1
+    purchase_cost[2] = 5;  selling_price[2] = 10;  // Product 2
+    purchase_cost[3] = 15; selling_price[3] = 20;  // Product 3
+    purchase_cost[4] = 25; selling_price[4] = 40;  // Product 4
+    purchase_cost[5] = 100; selling_price[5] = 125;// Product 5
+
+    // Products not defined in the table should have 0 as default values
+    for (int i = 0; i < sizeof(purchase_cost) / sizeof(purchase_cost[0]); i++) {
+        if (i > 5) {
+            purchase_cost[i] = 0;
+            selling_price[i] = 0;
+        }
+    }
+}
+
+int calculate_profit(int product_id, int units) {
+    if (units <= 0) {
+        return 0;  // No units sold, no profit
+    }
+    int profit_per_unit = selling_price[product_id] - purchase_cost[product_id];
+    return profit_per_unit * units;
+}
+
+void initialize_transaction_system(const char *filename) {
+    pthread_mutex_init(&file_lock, NULL);
+    initialize_product_pricing();
+
+    fp = fopen(filename, "r");
+    if (fp == NULL) {
+        perror("Failed to open file");
+        exit(1);
+    }
+
+    if (fscanf(fp, "%d", &total_operations) != 1) {
+        perror("Failed to read the number of operations");
+        fclose(fp);
+        exit(1);
+    }
+}
+
+void cleanup_transaction_system() {
+    fclose(fp);
+    pthread_mutex_destroy(&file_lock);
+}
