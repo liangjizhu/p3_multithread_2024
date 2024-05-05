@@ -12,6 +12,8 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+#define END_OF_PRODUCTION -1
+
 
 queue* transaction_queue;
 
@@ -71,6 +73,10 @@ int main (int argc, const char * argv[])
 {
 
   const char *filename = argv[1];
+  if (argc != 5) {
+    fprintf(stderr, "Usage: %s <file name> <num producers> <num consumers> <buff size>\n", argv[0]);
+    return EXIT_FAILURE;
+  }
   int num_producers = atoi(argv[2]);
   int num_consumers = atoi(argv[3]);
   int buff_size = atoi(argv[4]);
@@ -131,17 +137,25 @@ void* producer(void *arg) {
     struct element *transaction;
     while ((transaction = read_next_transaction()) != NULL) {
         queue_put(transaction_queue, transaction);
-        free(transaction); // Assuming queue_put copies the data
+        free(transaction);
     }
+    // Signal end of production by pushing a special 'end' transaction
+    transaction = malloc(sizeof(struct element));
+    transaction->product_id = END_OF_PRODUCTION;
+    queue_put(transaction_queue, transaction);
     return NULL;
 }
 
-
 void* consumer(void *arg) {
     struct element *transaction;
-    while ((transaction = queue_get(transaction_queue)) != NULL) {
+    while (1) {
+        transaction = queue_get(transaction_queue);
+        if (transaction->product_id == END_OF_PRODUCTION) {
+            free(transaction);
+            break;  // Exit the loop and terminate the thread
+        }
         process_transaction(transaction);
-        free(transaction);  // Free the element after processing
+        free(transaction);
     }
     return NULL;
 }
@@ -149,15 +163,19 @@ void* consumer(void *arg) {
 void process_transaction(struct element *trans) {
     int profit = 0;
     pthread_mutex_lock(&results_lock);
+
     if (trans->op == 0) {  // Purchase
-        product_stock[trans->product_id] += trans->units;
+        product_stock[trans->product_id - 1] += trans->units;
     } else if (trans->op == 1) {  // Sale
-        product_stock[trans->product_id] -= trans->units;
-        profit = calculate_profit(trans->product_id, trans->units);
-        profits += profit;
+        if (product_stock[trans->product_id - 1] >= trans->units) {
+            product_stock[trans->product_id - 1] -= trans->units;
+            profit = calculate_profit(trans->product_id, trans->units);
+            profits += profit;
+        }
     }
     pthread_mutex_unlock(&results_lock);
 }
+
 
 void initialize_product_pricing() {
     // Initialize costs and prices for each product based on the provided table
