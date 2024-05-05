@@ -14,16 +14,17 @@
 
 #define END_OF_PRODUCTION -1
 
-pthread_mutex_t file_lock, results_lock;
-FILE *fp = NULL;
-int current_operation = 0, total_operations = 0;
-int purchase_cost[6], selling_price[6];  // Extend arrays if more products are expected
-queue* transaction_queue = NULL;
-
 struct thread_data {
     int* profits;
     int* product_stock;
 };
+
+
+pthread_mutex_t file_lock, results_lock;
+FILE *fp = NULL;
+int current_operation = 0, total_operations = 0;
+int purchase_cost[5], selling_price[5];  // Extend arrays if more products are expected
+queue* transaction_queue = NULL;
 
 
 void initialize_product_pricing();
@@ -169,7 +170,7 @@ void process_transaction(struct element *trans, struct thread_data *data) {
             *(data->profits) += profit;
         }
     } else {  // Sale
-        if (idx >= 0 && idx < 5 && data->product_stock[idx] >= trans->units) {
+        if (idx >= 0 && idx < 5) {
             data->product_stock[idx] -= trans->units;
             int profit = calculate_profit(trans->product_id, trans->units, 1);
             *(data->profits) += profit;
@@ -179,35 +180,14 @@ void process_transaction(struct element *trans, struct thread_data *data) {
 }
 
 
-/*
-void process_transaction(struct element *trans, struct thread_data *data) {
-    pthread_mutex_lock(&results_lock);
-    int idx = trans->product_id - 1;  // Adjust index for zero-based array access
-
-    if (trans->op == 0) {  // Purchase
-        if (idx >= 0 && idx < 5) {
-            data->product_stock[idx] += trans->units;
-        }
-    } else {  // Sale
-        if (idx >= 0 && idx < 5 && data->product_stock[idx] >= trans->units) {
-            data->product_stock[idx] -= trans->units;
-            int profit = calculate_profit(trans->product_id, trans->units);
-            *(data->profits) += profit;  // Update the profits using the pointer
-        }
-    }
-    pthread_mutex_unlock(&results_lock);
-}*/
-
-
-
 
 void initialize_product_pricing() {
     // Initialize costs and prices for each product based on the provided table
-    purchase_cost[1] = 2;  selling_price[1] = 3;   // Product 1
-    purchase_cost[2] = 5;  selling_price[2] = 10;  // Product 2
-    purchase_cost[3] = 15; selling_price[3] = 20;  // Product 3
-    purchase_cost[4] = 25; selling_price[4] = 40;  // Product 4
-    purchase_cost[5] = 100; selling_price[5] = 125;// Product 5
+    purchase_cost[0] = 2;  selling_price[0] = 3;   // Product 1
+    purchase_cost[1] = 5;  selling_price[1] = 10;  // Product 2
+    purchase_cost[2] = 15; selling_price[2] = 20;  // Product 3
+    purchase_cost[3] = 25; selling_price[3] = 40;  // Product 4
+    purchase_cost[4] = 100; selling_price[4] = 125;// Product 5
 
     // Products not defined in the table should have 0 as default values
     for (int i = 0; i < sizeof(purchase_cost) / sizeof(purchase_cost[0]); i++) {
