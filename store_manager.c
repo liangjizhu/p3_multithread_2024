@@ -36,98 +36,98 @@ void* consumer(void *arg);
 void* producer(void *arg);
 
 struct element* read_next_transaction() {
-  pthread_mutex_lock(&file_lock);
+    pthread_mutex_lock(&file_lock);
 
-  if (current_operation >= total_operations) {
-      pthread_mutex_unlock(&file_lock);
-      return NULL;
-  }
+    if (current_operation >= total_operations) {
+        pthread_mutex_unlock(&file_lock);
+        return NULL;
+    }
 
-  struct element* new_elem = malloc(sizeof(struct element));
-  if (new_elem == NULL) {
-      pthread_mutex_unlock(&file_lock);
-      return NULL;
-  }
+    struct element* new_elem = malloc(sizeof(struct element));
+    if (new_elem == NULL) {
+        pthread_mutex_unlock(&file_lock);
+        return NULL;
+    }
 
-  char operation[10]; // Temporary string to hold the operation
-  if (fscanf(fp, "%d %s %d", &new_elem->product_id, operation, &new_elem->units) != 3) {
-      free(new_elem);
-      pthread_mutex_unlock(&file_lock);
-      return NULL;
-  }
+    char operation[10]; // Temporary string to hold the operation
+    if (fscanf(fp, "%d %s %d", &new_elem->product_id, operation, &new_elem->units) != 3) {
+        free(new_elem);
+        pthread_mutex_unlock(&file_lock);
+        return NULL;
+    }
 
-  new_elem->op = (strcmp("PURCHASE", operation) == 0) ? 0 : 1;
-  current_operation++;
+    new_elem->op = (strcmp("PURCHASE", operation) == 0) ? 0 : 1;
+    current_operation++;
 
-  pthread_mutex_unlock(&file_lock);
-  return new_elem;
+    pthread_mutex_unlock(&file_lock);
+    return new_elem;
 }
 
 
 int main (int argc, const char * argv[])
 {
-  if (argc != 5) {
-    fprintf(stderr, "Usage: %s <file name> <num producers> <num consumers> <buff size>\n", argv[0]);
-    return EXIT_FAILURE;
-  }
+    if (argc != 5) {
+        fprintf(stderr, "Usage: %s <file name> <num producers> <num consumers> <buff size>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
 
-  const char *filename = argv[1];
-  int num_producers = atoi(argv[2]);
-  int num_consumers = atoi(argv[3]);
-  int buff_size = atoi(argv[4]);
-  int profits = 0;
-  int product_stock[5] = {0};
+    const char *filename = argv[1];
+    int num_producers = atoi(argv[2]);
+    int num_consumers = atoi(argv[3]);
+    int buff_size = atoi(argv[4]);
+    int profits = 0;
+    int product_stock[5] = {0};
 
-  if (num_producers <= 0 || num_consumers <= 0 || buff_size <= 0) {
-    fprintf(stderr, "Invalid number of producers, consumers, or buffer size\n");
-    return EXIT_FAILURE;
-  }
+    if (num_producers <= 0 || num_consumers <= 0 || buff_size <= 0) {
+        fprintf(stderr, "Invalid number of producers, consumers, or buffer size\n");
+        return EXIT_FAILURE;
+    }
 
-  // Initialize global variables and pricing
-  initialize_product_pricing();
-  initialize_transaction_system(filename);
-
-
-  transaction_queue = queue_init(buff_size);
-  if (transaction_queue == NULL) {
-    fprintf(stderr, "Failed to initialize the queue\n");
-    return 1;
-  }
-  
-  pthread_mutex_init(&results_lock, NULL);
-  pthread_t producers[num_producers], consumers[num_consumers];
-  struct thread_data data = {&profits, product_stock};
-
-  // Create producer and consumer threads
-  for (int i = 0; i < num_producers; i++) {
-      pthread_create(&producers[i], NULL, producer, &data);
-  }
-  for (int i = 0; i < num_consumers; i++) {
-      pthread_create(&consumers[i], NULL, consumer, &data);
-  }
-
-  // Wait for all threads to finish
-  for (int i = 0; i < num_producers; i++) {
-      pthread_join(producers[i], NULL);
-  }
-  for (int i = 0; i < num_consumers; i++) {
-      pthread_join(consumers[i], NULL);
-  }
+    // Initialize global variables and pricing
+    initialize_product_pricing();
+    initialize_transaction_system(filename);
 
 
-  // Output
-  printf("Total: %d euros\n", profits);
-  printf("Stock:\n");
-  printf("  Product 1: %d\n", product_stock[0]);
-  printf("  Product 2: %d\n", product_stock[1]);
-  printf("  Product 3: %d\n", product_stock[2]);
-  printf("  Product 4: %d\n", product_stock[3]);
-  printf("  Product 5: %d\n", product_stock[4]);
+    transaction_queue = queue_init(buff_size);
+    if (transaction_queue == NULL) {
+        fprintf(stderr, "Failed to initialize the queue\n");
+        return 1;
+    }
+    
+    pthread_mutex_init(&results_lock, NULL);
+    pthread_t producers[num_producers], consumers[num_consumers];
+    struct thread_data data = {&profits, product_stock};
 
-  cleanup_transaction_system();
-  queue_destroy(transaction_queue);
-  pthread_mutex_destroy(&results_lock);
-  return 0;
+    // Create producer and consumer threads
+    for (int i = 0; i < num_producers; i++) {
+        pthread_create(&producers[i], NULL, producer, &data);
+    }
+    for (int i = 0; i < num_consumers; i++) {
+        pthread_create(&consumers[i], NULL, consumer, &data);
+    }
+
+    // Wait for all threads to finish
+    for (int i = 0; i < num_producers; i++) {
+        pthread_join(producers[i], NULL);
+    }
+    for (int i = 0; i < num_consumers; i++) {
+        pthread_join(consumers[i], NULL);
+    }
+
+
+    // Output
+    printf("Total: %d euros\n", profits);
+    printf("Stock:\n");
+    printf("  Product 1: %d\n", product_stock[0]);
+    printf("  Product 2: %d\n", product_stock[1]);
+    printf("  Product 3: %d\n", product_stock[2]);
+    printf("  Product 4: %d\n", product_stock[3]);
+    printf("  Product 5: %d\n", product_stock[4]);
+
+    cleanup_transaction_system();
+    queue_destroy(transaction_queue);
+    pthread_mutex_destroy(&results_lock);
+    return 0;
 }
 
 void* producer(void *arg) {
