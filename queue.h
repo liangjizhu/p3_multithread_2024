@@ -5,19 +5,19 @@
 #include <pthread.h>
 
 struct element {
-    int product_id; // Product identifier
-    int op;         // Operation: 0 for purchase, 1 for sale
-    int units;      // Product units
+    int product_id; // product identifier
+    int op;         // operation: 0 for purchase, 1 for sale
+    int units;      // product units
 };
 
 typedef struct queue {
-    struct element *elements;   // Array of elements
-    int capacity;               // Maximum number of items in the queue
-    int front;                  // Index of the front item
-    int rear;                   // Index of the rear item
+    struct element *elements;   // array of elements
+    int capacity;               // maximum number of items in the queue
+    int front;                  // index of the front item
+    int rear;                   // index of the rear item
     int count;                  // Number of items in the queue
 
-    // Synchronization tools
+    // mutex synchronization tools
     pthread_mutex_t lock;
     pthread_cond_t can_produce;
     pthread_cond_t can_consume;
